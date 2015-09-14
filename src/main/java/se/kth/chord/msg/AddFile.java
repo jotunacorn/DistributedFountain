@@ -1,25 +1,22 @@
 package se.kth.chord.msg;
 
+import se.kth.chord.node.DataBlock;
 import se.sics.kompics.KompicsEvent;
 
 import java.io.Serializable;
+import java.util.HashMap;
 
 /**
  * Created by joakim on 2015-09-13.
  */
 public class AddFile implements KompicsEvent, Serializable{
-    String name;
-    byte [] file;
-    public AddFile(String name, byte [] file){
-        this.name = name;
-        this.file = file;
+    DataBlock dataBlock;
+    public AddFile(DataBlock dataBlock){
+        this.dataBlock = dataBlock;
     }
 
-    public String getName() {
-        return name;
+    public DataBlock getDataBlock() {
+        return dataBlock;
     }
 
-    public byte[] getFile() {
-        return file;
-    }
 }

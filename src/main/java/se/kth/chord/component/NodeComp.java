@@ -23,6 +23,7 @@ import org.slf4j.LoggerFactory;
 import se.kth.chord.component.init.NodeInit;
 import se.kth.chord.msg.Pong;
 import se.kth.chord.msg.AddFile;
+import se.kth.chord.msg.RetrieveFile;
 import se.kth.chord.msg.Status;
 import se.kth.chord.msg.net.*;
 import se.kth.chord.msg.parentport.NewParentAlert;
@@ -39,6 +40,7 @@ import se.sics.kompics.timer.ScheduleTimeout;
 import se.sics.kompics.timer.Timer;
 import se.sics.p2ptoolbox.util.network.NatedAddress;
 
+import javax.xml.crypto.Data;
 import java.util.*;
 
 
@@ -78,6 +80,8 @@ public class NodeComp extends ComponentDefinition {
     private Map<Integer, NatedAddress> sentIndirectPings;
     private Map<Integer, Integer> kPingNrToPingNrMapping;
 
+    //DATA STORAGE STUFF
+    HashMap<String, Set<DataBlock>> storedData;
 
     public NodeComp(NodeInit init) {
         if (ENABLE_LOGGING) {
@@ -103,6 +107,8 @@ public class NodeComp extends ComponentDefinition {
         if (ENABLE_LOGGING) {
             nodeHandler.printAliveNodes();
         }
+
+        storedData = new HashMap<>();
 
         subscribe(handleStart, control);
         subscribe(handleStop, control);
@@ -519,5 +525,28 @@ public class NodeComp extends ComponentDefinition {
         trigger(cpt, timer);
         statusTimeoutId = null;
     }
+
+    //---FILE STORAGE STUFF---
+    private Handler<NetAddFile> handleAddFile = new Handler<NetAddFile>() {
+
+        @Override
+        public void handle(NetAddFile file) {
+            if(storedData.containsKey(file.getContent().getDataBlock().getFilename())){
+                Set<DataBlock> storedFiles = storedData.get(file.getContent().getDataBlock().getFilename());
+                storedFiles.add(file.getContent().getDataBlock());
+            }
+            else{
+                Set<DataBlock> newSet = new HashSet<>();
+                newSet.add(file.getContent().getDataBlock());
+                storedData.put(file.getContent().getDataBlock().getFilename(), newSet);
+            }
+        }
+    };
+    private Handler<NetRetrieveFile> handleRetreiveFile = new Handler<NetRetrieveFile>() {
+        @Override
+        public void handle(NetRetrieveFile retriveFile) {
+
+        }
+    };
 
 }
