@@ -153,19 +153,22 @@ public class Encoder {
 		}
 		System.out.println("Decoder>Got all blocks needed. Starting decode");
 		ack.set(true);
-
+		Set<Integer> usedNeighbours = new HashSet<>();
 		while((i = existsExactlyOneNeighbour(received)) != null){ // If does not exist, and ripple is empty, then it's a fail.
 			j = ((LinkedList<Integer>) i.getNeighbours()).getFirst();
-			
 			inputBlock[j] = i.getData();
 			
 			for(Block l : received)
 				if(l.getNeighbours().contains(j)){
+                    usedNeighbours.add(j);
 					l.xor(inputBlock[j]);
 					l.removeNeighbour(j);
 				}
+//            if(usedNeighbours.size() == k){
+//                System.out.println("The file is complete. K was " + k);
+//                break;
+//            }
 		}
-				
 		return(merge(inputBlock));
 	}
 	
