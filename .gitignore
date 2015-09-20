@@ -2,3 +2,6 @@
 target/
 swim-project.iml
 convergance.txt
+.classpath
+.project
+.settings/
