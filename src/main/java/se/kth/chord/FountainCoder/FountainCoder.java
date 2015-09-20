@@ -9,6 +9,7 @@ import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -24,9 +25,10 @@ import net.fec.openrq.parameters.FECParameters;
 public class FountainCoder {
 
     public static ConcurrentLinkedQueue<EncodingPacket> result;
+    public static Semaphore availableDrops;
     private static final int BYTES_TO_READ = 512 * 1024 * 1024;
     private static final int NR_OF_THREADS = 8;
-    private static final int PAY_LEN = 1500 - 20 - 8; // UDP-Ipv4 payload length
+    private static final int PAY_LEN = 4*(1500 - 20 - 8); // UDP-Ipv4 payload length
     public static int numberOfEncodedBlocks = 1;
     public static int nrOfBlocksToEncode = 0;
     // Fixed value for the maximum decoding block size
@@ -39,6 +41,7 @@ public class FountainCoder {
     public static void main(String[] args) {
         System.out.println("The max length is " + MAX_DATA_LEN + " and the bytes to read is " + BYTES_TO_READ);
         result = new ConcurrentLinkedQueue<>();
+        availableDrops = new Semaphore(0,false);
         Path path = Paths.get("C:\\Users\\joakim\\Downloads\\ubuntu-14.04.3-server-i386.iso");
         byte[] data = null;
         try {
@@ -48,7 +51,7 @@ public class FountainCoder {
         }
 
         FECParameters parameters = getParameters(BYTES_TO_READ);
-        System.out.println("Created parameters with " +  parameters.symbolSize() + " symbolsize, " + parameters.dataLengthAsInt() + " datalength " + " and " + parameters.numberOfSourceBlocks() + " number of sourceblocks.");
+        System.out.println("Created parameters with " +  parameters.symbolSize() + " symbolsize, " + parameters.dataLengthAsInt() + " datalength " + " and " + parameters.numberOfSourceBlocks() + " sourceblocks.");
         nrOfBlocksToEncode = parameters.numberOfSourceBlocks();
         DataEncoder encoder = OpenRQ.newEncoder(data, parameters);
         Iterator<SourceBlockEncoder> iter = encoder.sourceBlockIterable().iterator();
@@ -71,7 +74,8 @@ public class FountainCoder {
             e.printStackTrace();
             System.exit(-3);
         }
-        System.out.println("Finished with encoding in " + (System.currentTimeMillis() - time) + "ms");
+        long finishTime = (System.currentTimeMillis() - time);
+        System.out.println("Finished with encoding " + BYTES_TO_READ/1000000 + "MB in " + finishTime + "ms. Average "+ BYTES_TO_READ/(finishTime*1000) + " MB/s");
         System.out.println("The result list is " + result.size() + " long.");
 //        System.out.println("Starting decoding");
 //        time = System.currentTimeMillis();
@@ -135,6 +139,7 @@ class BlockEncoder extends Thread {
                 iteratorLock.unlock();
                 encodeSourceBlock(blockToEncode);
                 blocksProccessed++;
+                FountainCoder.availableDrops.release();
                 System.out.println(threadNumber + "> Encoding at " + String.format("%.1f",round(((double)FountainCoder.numberOfEncodedBlocks++/(double)FountainCoder.nrOfBlocksToEncode),3)*100) + "%");
             } else {
                 iteratorLock.unlock();
