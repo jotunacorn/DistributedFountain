@@ -20,30 +20,37 @@ import static net.fec.openrq.parameters.ParameterChecker.minDataLength;
 
 import net.fec.openrq.parameters.FECParameters;
 
-public class FountainCoder extends Thread{
+public class FountainEncoder extends Thread{
+
 
     private ConcurrentLinkedQueue<byte[]> result;
     private Semaphore availableDrops;
     private Semaphore done;
     private Path pathToRead = Paths.get("C:\\Users\\joakim\\Downloads\\ubuntu-14.04.3-server-i386.iso");
-    ;
-    private int nrOfBytes = 512 * 1024 * 1024;
-
+    private FECParameters parameters = null;
+    private int nrOfBytes = 0;
 
     //Encoding properties
+    //Number of threads encoding
     private static final int NR_OF_THREADS = 8;
-    private static final int PAY_LEN = 4 * (1500 - 20 - 8); // UDP-Ipv4 payload times 4
-    private static final int MAX_DEC_MEM = 4 * 1024 * 1024; // 4 MiB
-    public static final long MAX_DATA_LEN = maxAllowedDataLength(PAY_LEN, MAX_DEC_MEM);    // The maximum allowed data length, given the parameters above
+    //The number of sourceblocks needed
+    private static final int NR_OF_SOURCEBLOCKS = 8; //If number of partitions is less than number of threads less threads will be used.
+    // Fixed value for the symbol size
+    private static final int SYMB_SIZE = 4*(1500 - 20 - 8); // UDP-Ipv4 payload length
+    // The maximum allowed data length, given the parameter above
+    public static final long MAX_DATA_LEN = maxAllowedDataLength(SYMB_SIZE);
+    // The redundancy in the system. This will lead to more blocks than needed is created to ensure that this fraction of files can get lost with high chance of recovery
+    public static final double ESTIMATED_LOSS = 0.1;
 
     //A simple usage sample for receiving droplets via a queue
     public static void main(String[] args) {
-        FountainCoder fountainCoder = new FountainCoder(Paths.get("C:\\Users\\joakim\\Downloads\\ubuntu-14.04.3-server-i386.iso"), 256 * 1024 * 1024);
+        FountainEncoder fountainCoder = new FountainEncoder(Paths.get("C:\\Users\\joakim\\Downloads\\ubuntu-14.04.3-server-i386.iso"), 64 * 1024 * 1024);
         Semaphore s = fountainCoder.dropsletsSemaphore();
         ConcurrentLinkedQueue<byte[]> result = fountainCoder.getQueue();
         Semaphore done = fountainCoder.getDoneLock();
         fountainCoder.start();
         int counter = 0;
+        long totalSize = 0;
         while (!done.tryAcquire() || result.peek()!=null) {
             boolean acquired = false;
             try {
@@ -53,14 +60,16 @@ public class FountainCoder extends Thread{
             }
             if (acquired) {
                 byte[] block = result.poll();
+                totalSize = totalSize + block.length;
                 counter++;
-                System.out.println("Received block nr " + counter);
+                if(counter%5000==0)
+                    System.out.println("Received block nr " + counter);
             }
         }
-        System.out.println("All blocks (" + counter + ") received at main");
+        System.out.println("All blocks (" + counter + ") received at main. The encoded files are " + totalSize/ 1000000 + "MB");
     }
 
-    public FountainCoder(Path path, int nrOfBytes) {
+    public FountainEncoder(Path path, int nrOfBytes) {
         this.nrOfBytes = nrOfBytes;
         this.pathToRead = path;
         result = new ConcurrentLinkedQueue<>();
@@ -80,6 +89,9 @@ public class FountainCoder extends Thread{
         return this.done;
     }
 
+    public FECParameters getParameters(){
+        return parameters;
+    }
     public void run() {
         System.out.println("The max length is " + MAX_DATA_LEN + " and the bytes to read is " + nrOfBytes);
         byte[] data = null;
@@ -88,9 +100,15 @@ public class FountainCoder extends Thread{
         } catch (IOException e) {
             e.printStackTrace();
         }
-
-        FECParameters parameters = getParameters(nrOfBytes);
-        System.out.println("Created parameters with " + parameters.symbolSize() + " symbolsize, " + parameters.dataLengthAsInt() + " datalength " + " and " + parameters.numberOfSourceBlocks() + " sourceblocks.");
+        parameters = getParameters(nrOfBytes);
+        System.out.println("Created parameters with \n " +
+                "Symbolsize:" + parameters.symbolSize() +
+                "\n Datalength:" + parameters.dataLengthAsInt() +
+                "\n NumberOfSourceBlocks:" + parameters.numberOfSourceBlocks() +
+                "\n TotalSymbols:" + parameters.totalSymbols());
+        int nrOfRepairSymbols=OpenRQ.minRepairSymbols(parameters.totalSymbols(), 0, ESTIMATED_LOSS);
+        System.out.println("The number of symbols needed to be transmitted are " + nrOfRepairSymbols + "(" + String.format("%.2f",((double)nrOfRepairSymbols/(double)parameters.totalSymbols())*100) + "%)" );
+        nrOfRepairSymbols = (nrOfRepairSymbols/NR_OF_SOURCEBLOCKS)+1;
         DataEncoder encoder = OpenRQ.newEncoder(data, parameters);
         Iterator<SourceBlockEncoder> iter = encoder.sourceBlockIterable().iterator();
         System.out.println("Starting encoding process");
@@ -98,7 +116,7 @@ public class FountainCoder extends Thread{
         BlockEncoder[] encoders = new BlockEncoder[NR_OF_THREADS];
         Lock l = new ReentrantLock();
         for (int i = 0; i < NR_OF_THREADS; i++) {
-            encoders[i] = new BlockEncoder(iter, l, i, availableDrops, result);
+            encoders[i] = new BlockEncoder(iter, l, i, availableDrops, result, nrOfRepairSymbols);
             encoders[i].start();
         }
         try {
@@ -114,41 +132,7 @@ public class FountainCoder extends Thread{
         }
         long finishTime = (System.currentTimeMillis() - time);
         done.release();
-        System.out.println("Finished with encoding " + nrOfBytes / 1000000 + "MB in " + finishTime + "ms. Average " + nrOfBytes / (finishTime * 1000) + " MB/s");
-        System.out.println("The result list is currently " + result.size() + " long.");
-//        System.out.println("Starting decoding");
-//        time = System.currentTimeMillis();
-//        ArrayDataDecoder decoder = OpenRQ.newDecoder(parameters, 1);
-//        byte[] decodedFile = null;
-//        int counter = 0;
-//
-//        while (!result.isEmpty()) {
-//            EncodingPacket packetToDecode = result.poll();
-//            Parsed<EncodingPacket> parsedPacket = decoder.parsePacket(packetToDecode.asArray(), false);
-//            packetToDecode = parsedPacket.value();
-//            if (parsedPacket.failureReason().length() < 2) {
-//                counter++;
-//            }
-//            else{
-//                System.out.println("Parser failure with reason " + parsedPacket.failureReason());
-//            }
-//            if (decoder.isDataDecoded()) {
-//                System.out.println("Finished with encoding in " + (System.currentTimeMillis() - time) + "ms");
-//                break;
-//            }
-//        }
-//        decodedFile = decoder.dataArray();
-//        System.out.println("Finished with decoding in " + (System.currentTimeMillis() - time) + "ms with " + counter + " iterations");
-//        if (Arrays.equals(data, decodedFile)) {
-//            System.out.println("The arrays match");
-//        }
-//        else{
-//            System.out.println("It's a mismatch");
-//            System.out.println("Size of msg is " + msg.length + " and size of decodedFile is " + decodedFile.length);
-//            System.out.println("--------------MSG-------------");
-//            System.out.println(new String(msg));
-//            System.out.println("----------DECODEDFILE---------");
-//            System.out.println(new String(decodedFile));
+        System.out.println("Finished with encoding " + nrOfBytes / 1000000 + "MB in " + finishTime + "ms. Average " + nrOfBytes/(finishTime * 1000) + " MB/s");
     }
 
     public static FECParameters getParameters(long dataLen) {
@@ -158,13 +142,14 @@ public class FountainCoder extends Thread{
         if (dataLen > MAX_DATA_LEN)
             throw new IllegalArgumentException("data length is too large");
 
-        return FECParameters.deriveParameters(dataLen, PAY_LEN, MAX_DEC_MEM);
+        return FECParameters.newParameters(dataLen, SYMB_SIZE, NR_OF_SOURCEBLOCKS);
     }
 
 }
 
 
 class BlockEncoder extends Thread {
+    int nrOfRepairSymbols = 0;
     int threadNumber;
     Iterator<SourceBlockEncoder> iterator;
     int blocksProcessed = 0;
@@ -189,12 +174,13 @@ class BlockEncoder extends Thread {
 
     }
 
-    public BlockEncoder(Iterator<SourceBlockEncoder> iterator, Lock iteratorLock, int threadNumber, Semaphore availableDrops, ConcurrentLinkedQueue<byte[]> result) {
+    public BlockEncoder(Iterator<SourceBlockEncoder> iterator, Lock iteratorLock, int threadNumber, Semaphore availableDrops, ConcurrentLinkedQueue<byte[]> result, int nrOfRepairSymbols) {
         this.threadNumber = threadNumber;
         this.iterator = iterator;
         this.iteratorLock = iteratorLock;
         this.availableDrops = availableDrops;
         this.result = result;
+        this.nrOfRepairSymbols = nrOfRepairSymbols;
     }
 
     private void encodeSourceBlock(SourceBlockEncoder sbEnc) {
@@ -214,7 +200,7 @@ class BlockEncoder extends Thread {
     }
 
     private int numberOfRepairSymbols() {
-        return 1;
+        return nrOfRepairSymbols;
     }
 
     private void sendPacket(EncodingPacket pac) {
