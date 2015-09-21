@@ -25,7 +25,7 @@ import net.fec.openrq.parameters.FECParameters;
 public class FountainEncoder extends Thread{
 
 
-    private static final int BYTES_TO_READ = 64 * 1024 * 1024;
+    private static final int BYTES_TO_READ = 128 * 1024 * 1024;
     private ConcurrentLinkedQueue<byte[]> result;
     private Semaphore availableDrops;
     private Semaphore done;
@@ -35,7 +35,7 @@ public class FountainEncoder extends Thread{
 
     //Encoding properties
     //Number of threads encoding
-    private static final int NR_OF_THREADS = 8;
+    public static final int NR_OF_THREADS = 8;
     //The number of sourceblocks needed
     private static final int NR_OF_SOURCEBLOCKS = 8; //If number of partitions is less than number of threads less threads will be used.
     // Fixed value for the symbol size
@@ -142,7 +142,7 @@ public class FountainEncoder extends Thread{
         }
         long finishTime = (System.currentTimeMillis() - time);
         done.release();
-        System.out.println("Finished with encoding " + nrOfBytes / 1000000 + "MB in " + finishTime + "ms. Average " + nrOfBytes/(finishTime * 1000) + " MB/s");
+        System.out.println("Finished with encoding " + nrOfBytes / (1024 * 1024) + "MiB in " + finishTime + "ms. Average " + nrOfBytes/(finishTime * 1024) + " MB/s");
     }
 
     public static FECParameters getParameters(long dataLen) {
