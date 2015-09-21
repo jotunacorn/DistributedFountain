@@ -25,7 +25,7 @@ import net.fec.openrq.parameters.FECParameters;
 public class FountainEncoder extends Thread{
 
 
-    private static final int BYTES_TO_READ = 128 * 1024 * 1024;
+    private static final int BYTES_TO_READ = 256 * 1024 * 1024;
     private ConcurrentLinkedQueue<byte[]> result;
     private Semaphore availableDrops;
     private Semaphore done;
@@ -42,41 +42,55 @@ public class FountainEncoder extends Thread{
     private static final int SYMB_SIZE = 8*(1500 - 20 - 8); // X * (UDP-Ipv4 payload length)
     // The maximum allowed data length, given the parameter above
     public static final long MAX_DATA_LEN = maxAllowedDataLength(SYMB_SIZE);
-    // The redundancy in the system. This will lead to more blocks than needed is created to ensure that at most this fraction of files can get lost with high chance of recovery (greater than 99%)
+    // The redundancy in the system. This number should be higher than the anticipated loss. Chance of loss also increase with NR_OF_SOURCEBLOCKS
     public static final double ESTIMATED_LOSS = 0.5;
 
     //A simple usage sample for receiving droplets via a queue
     public static void main(String[] args) {
-        FountainEncoder fountainCoder = new FountainEncoder(Paths.get("C:\\Users\\joakim\\Downloads\\ubuntu-14.04.3-server-i386.iso"), BYTES_TO_READ);
-        Semaphore s = fountainCoder.dropsletsSemaphore();
-        ConcurrentLinkedQueue<byte[]> result = fountainCoder.getQueue();
-        Semaphore done = fountainCoder.getDoneLock();
-        fountainCoder.start();
-        int counter = 0;
-        long totalSize = 0;
-        Set<byte[]> encodedBlocks = new HashSet<>();
-        while (!done.tryAcquire() || result.peek()!=null) {
-            boolean acquired = false;
+        FountainEncoder fountainCoder = new FountainEncoder(Paths.get("C:\\Users\\joakim\\Downloads\\ubuntu-14.04.3-server-i386.iso"), BYTES_TO_READ); //New encoder with a Path to read
+        Semaphore s = fountainCoder.dropsletsSemaphore();   //Semaphore to see if there are new droplets available
+        ConcurrentLinkedQueue<byte[]> result = fountainCoder.getQueue();    //Queue with the output
+        fountainCoder.start();   //Start the encoder in a new thread
+        int counter = 0;        //Count the number of droplets received
+        long totalSize = 0;     //Count the total size of the output
+        FountainDecoder decoder = new FountainDecoder(parameters);  //Create a new decoder with the same parameters as the encoder
+        boolean firstAcquire = true;
+        while (result.peek()!=null) {   //Run as long as we're getting blocks
+            boolean acquired = false;   //See if there are new blocks available
             try {
                 acquired = s.tryAcquire(100, TimeUnit.MILLISECONDS);
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
-            if (acquired) {
-                byte[] block = result.poll();
+
+            if (acquired) { //We've gotten a new block
+                if(firstAcquire){    //If it's our first acquire we start up the decoder.
+                    firstAcquire = false;
+                    decoder.setParameters(parameters);
+                    decoder.start();
+                }
+
+                byte[] block = result.poll();   //retrive the block
                 totalSize = totalSize + block.length;
-                encodedBlocks.add(block);
+                if(Math.random() > 0.35) {        //Throw away some files
+                    decoder.addBytes(block);      //Add the block to the decoder
+                }
                 counter++;
                 if(counter%5000==0)
                     System.out.println("Received block nr " + counter);
+
             }
+
         }
         System.out.println("All blocks (" + counter + ") received at main. The encoded files are " + totalSize/ 1000000 + "MB");
-
-        FountainDecoder decoder = new FountainDecoder(encodedBlocks, parameters);
         long time = System.currentTimeMillis();
-        decoder.startDecoding();
-        System.out.println("Done with decoding. It took " + (System.currentTimeMillis() - time) + " ms");
+        try {
+            decoder.join();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+        System.out.println("Done with decoding. Time since encoding was done is " + (System.currentTimeMillis()-time) + "ms.");
+
     }
 
     public FountainEncoder(Path path, int nrOfBytes) {

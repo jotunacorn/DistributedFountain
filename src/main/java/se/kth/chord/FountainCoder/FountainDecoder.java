@@ -18,31 +18,40 @@ import java.util.concurrent.locks.ReentrantLock;
 /**
  * Created by joakim on 2015-09-20.
  */
-public class FountainDecoder {
+public class FountainDecoder extends Thread{
+
     FECParameters parameters;
     Semaphore availableBytes;
     ConcurrentLinkedQueue<byte[]> byteQueue;
+    BlockDecoder [] decoders = null;
     public FountainDecoder(Collection<byte[]> bytesToDecode, FECParameters parameters){
         this.parameters = parameters;
         this.availableBytes = new Semaphore(bytesToDecode.size(),true);
         this.byteQueue = new ConcurrentLinkedQueue<>(bytesToDecode);
     }
 
-    public FountainDecoder(ConcurrentLinkedQueue<byte[]> byteQueue, Semaphore availableBytes, FECParameters parameters){
+    public FountainDecoder(FECParameters parameters){
         this.parameters = parameters;
-        this.availableBytes = availableBytes;
-        this.byteQueue = byteQueue;
+        this.availableBytes = new Semaphore(0, true);
+        this.byteQueue = new ConcurrentLinkedQueue<>();
+    }
+
+    @Override
+    public void run() {
+        startDecoding();
+    }
+    public void setParameters(FECParameters parameters){
+        this.parameters = parameters;
     }
     public void startDecoding(){
         DataDecoder decoder = OpenRQ.newDecoder(parameters,1); // 0 = 99% probability of success, 1 = 99.99% probability, 2 = 99.9999% probability. This is only for performance reasons.
         Iterator<SourceBlockDecoder> sourceIterator = decoder.sourceBlockIterable().iterator();
         int nrOfThreads = Math.min(decoder.numberOfSourceBlocks(), FountainEncoder.NR_OF_THREADS);
-        BlockDecoder [] decoders = new BlockDecoder[nrOfThreads];
+        decoders = new BlockDecoder[nrOfThreads];
         ReentrantLock sourceIteratorLock = new ReentrantLock();
         ReentrantLock decoderLock = new ReentrantLock();
         for(int i = 0; i<nrOfThreads; i++){
-            decoders[i] = new BlockDecoder(sourceIterator, sourceIteratorLock, byteQueue,decoder,decoderLock,i);
-            decoders[i].start();
+            decoders[i] = new BlockDecoder(sourceIterator, sourceIteratorLock, byteQueue,decoder,decoderLock,i, availableBytes); //The threads start in the constructor
         }
         try {
             for (int i = 0; i < nrOfThreads; i++) {
@@ -62,6 +71,22 @@ public class FountainDecoder {
             System.out.println("The file couldn't be recovered");
         }
     }
+    public void addBytes(byte [] arrayToAdd){
+        this.byteQueue.add(arrayToAdd);
+        availableBytes.release();
+    }
+    public void interruptDecoding(){
+        if(decoders!=null){
+            for(int i = 0; i<decoders.length; i++){
+                decoders[i].interruptThread();
+            }
+            byteQueue.notifyAll();
+        }
+        else{
+            System.out.println("Decoding hasn't started");
+        }
+
+    }
 }
 class BlockDecoder extends Thread {
     ReentrantLock sourceIteratorLock;
@@ -69,7 +94,9 @@ class BlockDecoder extends Thread {
     ConcurrentLinkedQueue<byte[]> bytesToRead;
     DataDecoder decoder;
     ReentrantLock decoderLock;
+    Semaphore availableBytes;
     int threadNumber;
+    boolean interrupted = false;
     public void run() {
         sourceIteratorLock.lock();
         while(sourceIterator.hasNext()){
@@ -82,33 +109,51 @@ class BlockDecoder extends Thread {
         System.out.println("Decoding thread nr" + threadNumber + " has finished decoding");
     }
 
-    public BlockDecoder(Iterator<SourceBlockDecoder> sourceIterator, ReentrantLock sourceIteratorLock, ConcurrentLinkedQueue<byte[]> bytesToRead, DataDecoder decoder, ReentrantLock decoderLock, int threadNumber) {
+    public void interruptThread(){
+        this.interrupted = true;
+        this.interruptThread();
+    }
+    public BlockDecoder(Iterator<SourceBlockDecoder> sourceIterator, ReentrantLock sourceIteratorLock, ConcurrentLinkedQueue<byte[]> bytesToRead, DataDecoder decoder, ReentrantLock decoderLock, int threadNumber, Semaphore availableBytes) {
         this.sourceIterator = sourceIterator;
         this.sourceIteratorLock = sourceIteratorLock;
         this.bytesToRead = bytesToRead;
         this.threadNumber = threadNumber;
         this.decoder = decoder;
         this.decoderLock = decoderLock;
+        this.availableBytes = availableBytes;
+        this.start();
     }
 
     private void decodeSourceBlock(SourceBlockDecoder sourceBlock) {
-        byte[] block;
-        int counter = 0;
-        while((block = bytesToRead.poll() )!= null) {
-            decoderLock.lock();
-            Parsed<EncodingPacket> parsedPacket = decoder.parsePacket(block, false);
-            decoderLock.unlock();
-            if(parsedPacket.failureReason().length() < 1){
+        while(!sourceBlock.isSourceBlockDecoded()) {
+            if(interrupted){
+                System.out.println("Thread nr " + threadNumber + " has been interrupted");
+                break;
+            }
+            byte[] block = bytesToRead.poll();
+            if(block == null){
                 try {
-                    sourceBlock.putEncodingPacket(parsedPacket.value());
-                    counter++;
-                    if (sourceBlock.isSourceBlockDecoded()) {
-                        break;
+                    availableBytes.acquire();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+            else {
+                decoderLock.lock();
+                Parsed<EncodingPacket> parsedPacket = decoder.parsePacket(block, false);
+                decoderLock.unlock();
+                if (parsedPacket.failureReason().length() < 1) {
+                    try {
+                        sourceBlock.putEncodingPacket(parsedPacket.value());
+
+                    } catch (IllegalArgumentException e) {
+                        //(If it doesn't belong to this packet we throw it back.
+                        bytesToRead.add(block);
+                        availableBytes.release();
                     }
                 }
-                catch (IllegalArgumentException e){
-                    //(If it doesn't belong to this packet we throw it back.
-                    bytesToRead.add(block);
+                else{
+                    System.out.println("Failure in thread nr " + threadNumber + " with message:" + parsedPacket.failureReason());
                 }
             }
         }
