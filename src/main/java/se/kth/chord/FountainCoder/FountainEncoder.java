@@ -23,7 +23,7 @@ import net.fec.openrq.parameters.FECParameters;
 public class FountainEncoder extends Thread{
 
 
-    private static final int BYTES_TO_READ = 32 * 1024 * 1024;
+    private static final int BYTES_TO_READ = 64 * 1024 * 1024;
     private ConcurrentLinkedQueue<byte[]> result;
     private Semaphore availableDrops;
     private Semaphore done;
@@ -35,7 +35,7 @@ public class FountainEncoder extends Thread{
     //Number of threads encoding
     public static final int NR_OF_THREADS = 8;
     //The number of sourceblocks needed
-    private static final int NR_OF_SOURCEBLOCKS = 8; //If number of partitions is less than number of threads less threads will be used.
+    private static final int NR_OF_SOURCEBLOCKS = 40; //If number of partitions is less than number of threads less threads will be used.
     // Fixed value for the symbol size
     private static final int SYMB_SIZE = 8*(1500 - 20 - 8); // X * (UDP-Ipv4 payload length)
     // The maximum allowed data length, given the parameter above
@@ -45,7 +45,7 @@ public class FountainEncoder extends Thread{
 
     //A simple usage sample for receiving droplets via a queue
     public static void main(String[] args) {
-        int nrOfRuns = 100;
+        int nrOfRuns = 102;
         long [][] results = new long[nrOfRuns][2];
         for( int i = 0; i<nrOfRuns; i++) {
             FountainEncoder fountainCoder = new FountainEncoder(Paths.get("C:\\Users\\joakim\\Downloads\\ubuntu-14.04.3-server-i386.iso"), BYTES_TO_READ); //New encoder with a Path to read
@@ -70,7 +70,7 @@ public class FountainEncoder extends Thread{
 
                     byte[] block = result.poll();   //retrive the block
                     totalSize = totalSize + block.length;
-                    if (Math.random() > 0.35) {        //Throw away some files
+                    if (Math.random() > 0) {        //Throw away some files
                         decoder.addBytes(block);      //Add the block to the decoder
                     }
                     counter++;
@@ -83,7 +83,7 @@ public class FountainEncoder extends Thread{
             decoder.setParameters(parameters);
             startTime = System.currentTimeMillis();
             decoder.start();
-            System.out.println("All blocks (" + counter + ") received at main. The encoded files are " + totalSize / 1000000 + "MB");
+            System.out.println(i +">All blocks (" + counter + ") received at main. The encoded files are " + totalSize / 1000000 + "MB. It took " + results[i][0] + " ms");
             long time = System.currentTimeMillis();
             try {
                 decoder.join();
@@ -91,10 +91,15 @@ public class FountainEncoder extends Thread{
                 e.printStackTrace();
             }
             results[i][1] = System.currentTimeMillis()-startTime;
-            System.out.println("Done with decoding. Time since encoding was done is " + (System.currentTimeMillis() - time) + "ms.");
+            System.out.println("Done with decoding. The decoding was done in " + results[i][1]+ "ms.");
         }
+        System.out.println("Encoding time");
         for(int i = 0; i<nrOfRuns; i++){
-            System.out.println(results[i][0] + " " +results[i][1]);
+            System.out.println(results[i][0]);
+        }
+        System.out.println("Decoding time");
+        for(int i = 0; i<nrOfRuns; i++){
+            System.out.println(results[i][1]);
         }
     }
 
