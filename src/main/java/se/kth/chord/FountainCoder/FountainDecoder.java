@@ -1,18 +1,17 @@
 package se.kth.chord.FountainCoder;
 
+
 import net.fec.openrq.EncodingPacket;
 import net.fec.openrq.OpenRQ;
 import net.fec.openrq.Parsed;
 import net.fec.openrq.decoder.DataDecoder;
 import net.fec.openrq.decoder.SourceBlockDecoder;
-import net.fec.openrq.encoder.SourceBlockEncoder;
 import net.fec.openrq.parameters.FECParameters;
 
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
