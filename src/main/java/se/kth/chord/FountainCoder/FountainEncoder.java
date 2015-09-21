@@ -53,7 +53,8 @@ public class FountainEncoder extends Thread{
         long totalSize = 0;     //Count the total size of the output
         FountainDecoder decoder = new FountainDecoder(parameters);  //Create a new decoder with the same parameters as the encoder
         boolean firstAcquire = true;
-        while (result.peek()!=null) {   //Run as long as we're getting blocks
+        Semaphore done = fountainCoder.getDoneLock();
+        while (!done.tryAcquire() ||result.peek()!=null) {   //Run as long as we're getting blocks
             boolean acquired = false;   //See if there are new blocks available
             try {
                 acquired = s.tryAcquire(100, TimeUnit.MILLISECONDS);
@@ -62,11 +63,6 @@ public class FountainEncoder extends Thread{
             }
 
             if (acquired) { //We've gotten a new block
-                if(firstAcquire){    //If it's our first acquire we start up the decoder.
-                    firstAcquire = false;
-                    decoder.setParameters(parameters);
-                    decoder.start();
-                }
 
                 byte[] block = result.poll();   //retrive the block
                 totalSize = totalSize + block.length;
@@ -76,10 +72,11 @@ public class FountainEncoder extends Thread{
                 counter++;
                 if(counter%5000==0)
                     System.out.println("Received block nr " + counter);
-
             }
 
         }
+        decoder.setParameters(parameters);
+        decoder.start();
         System.out.println("All blocks (" + counter + ") received at main. The encoded files are " + totalSize/ 1000000 + "MB");
         long time = System.currentTimeMillis();
         try {
