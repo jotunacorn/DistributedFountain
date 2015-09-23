@@ -11,8 +11,31 @@ import java.util.Set;
  */
 public class DataBlock implements Serializable{
     String filename;
-    Set<Integer> sources;
+    int sequenceNumber;
+    byte sourceBlockNumber;
     byte [] data;
+    public DataBlock(String filename, int sequenceNumber, byte sourceBlockNumber){
+        this.filename = filename;
+        this.sequenceNumber = sequenceNumber;
+        this.sourceBlockNumber = sourceBlockNumber;
+    }
+
+    public int getSequenceNumber() {
+        return sequenceNumber;
+    }
+
+    public void setSequenceNumber(int sequenceNumber) {
+        this.sequenceNumber = sequenceNumber;
+    }
+
+    public byte getSourceBlockNumber() {
+        return sourceBlockNumber;
+    }
+
+    public void setSourceBlockNumber(byte sourceBlockNumber) {
+        this.sourceBlockNumber = sourceBlockNumber;
+    }
+
     public void setData(byte [] data){
         this.data = data;
     }
@@ -28,11 +51,4 @@ public class DataBlock implements Serializable{
         this.filename = filename;
     }
 
-    public Set<Integer> getSources() {
-        return sources;
-    }
-
-    public void setSources(Set<Integer> sources) {
-        this.sources = sources;
-    }
 }

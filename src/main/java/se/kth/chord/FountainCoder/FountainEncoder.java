@@ -23,7 +23,8 @@ import net.fec.openrq.parameters.FECParameters;
 public class FountainEncoder extends Thread{
 
 
-    private static final int BYTES_TO_READ = 64 * 1024 * 1024;
+    private static final int BYTES_TO_READ = 32 * 1024 * 1024;
+    private static final int NR_OF_RUNS = 1;
     private ConcurrentLinkedQueue<byte[]> result;
     private Semaphore availableDrops;
     private Semaphore done;
@@ -45,10 +46,10 @@ public class FountainEncoder extends Thread{
 
     //A simple usage sample for receiving droplets via a queue
     public static void main(String[] args) {
-        int nrOfRuns = 102;
-        long [][] results = new long[nrOfRuns][2];
-        for( int i = 0; i<nrOfRuns; i++) {
-            FountainEncoder fountainCoder = new FountainEncoder(Paths.get("C:\\Users\\joakim\\Downloads\\ubuntu-14.04.3-server-i386.iso"), BYTES_TO_READ); //New encoder with a Path to read
+        long [][] results = new long[NR_OF_RUNS][2];
+
+        for( int i = 0; i<NR_OF_RUNS; i++) {
+            FountainEncoder fountainCoder = new FountainEncoder(Paths.get("C:\\Users\\Joakim\\Downloads\\android-studio-bundle-141.1980579-windows.exe"), BYTES_TO_READ); //New encoder with a Path to read
             Semaphore s = fountainCoder.dropsletsSemaphore();   //Semaphore to see if there are new droplets available
             ConcurrentLinkedQueue<byte[]> result = fountainCoder.getQueue();    //Queue with the output
             long startTime = System.currentTimeMillis();
@@ -94,11 +95,11 @@ public class FountainEncoder extends Thread{
             System.out.println("Done with decoding. The decoding was done in " + results[i][1]+ "ms.");
         }
         System.out.println("Encoding time");
-        for(int i = 0; i<nrOfRuns; i++){
+        for(int i = 0; i<NR_OF_RUNS; i++){
             System.out.println(results[i][0]);
         }
         System.out.println("Decoding time");
-        for(int i = 0; i<nrOfRuns; i++){
+        for(int i = 0; i<NR_OF_RUNS; i++){
             System.out.println(results[i][1]);
         }
     }
