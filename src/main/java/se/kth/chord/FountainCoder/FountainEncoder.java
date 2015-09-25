@@ -4,7 +4,9 @@ import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Collections;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -19,24 +21,29 @@ import static net.fec.openrq.parameters.ParameterChecker.maxAllowedDataLength;
 import static net.fec.openrq.parameters.ParameterChecker.minDataLength;
 
 import net.fec.openrq.parameters.FECParameters;
+import se.kth.chord.node.DataBlock;
+
+import javax.xml.crypto.Data;
+
 
 public class FountainEncoder extends Thread{
 
 
     private static final int BYTES_TO_READ = 32 * 1024 * 1024;
-    private static final int NR_OF_RUNS = 1;
-    private ConcurrentLinkedQueue<byte[]> result;
+    private static final int NR_OF_RUNS = 4;
+    private ConcurrentLinkedQueue<DataBlock> result;
     private Semaphore availableDrops;
     private Semaphore done;
     private Path pathToRead = Paths.get("C:\\Users\\joakim\\Downloads\\ubuntu-14.04.3-server-i386.iso");
     private static FECParameters parameters = null;
-    private int nrOfBytes = 0;
 
+    private int nrOfBytes = 0;
+    public static byte nextBlockNumber;
     //Encoding properties
     //Number of threads encoding
     public static final int NR_OF_THREADS = 8;
     //The number of sourceblocks needed
-    private static final int NR_OF_SOURCEBLOCKS = 40; //If number of partitions is less than number of threads less threads will be used.
+    private static final int NR_OF_SOURCEBLOCKS = 8; //If number of partitions is less than number of threads less threads will be used.
     // Fixed value for the symbol size
     private static final int SYMB_SIZE = 8*(1500 - 20 - 8); // X * (UDP-Ipv4 payload length)
     // The maximum allowed data length, given the parameter above
@@ -49,9 +56,9 @@ public class FountainEncoder extends Thread{
         long [][] results = new long[NR_OF_RUNS][2];
 
         for( int i = 0; i<NR_OF_RUNS; i++) {
-            FountainEncoder fountainCoder = new FountainEncoder(Paths.get("C:\\Users\\Joakim\\Downloads\\android-studio-bundle-141.1980579-windows.exe"), BYTES_TO_READ); //New encoder with a Path to read
+            FountainEncoder fountainCoder = new FountainEncoder(Paths.get("C:\\Users\\joakim\\Downloads\\ubuntu-14.04.3-server-i386.iso"), BYTES_TO_READ); //New encoder with a Path to read
             Semaphore s = fountainCoder.dropsletsSemaphore();   //Semaphore to see if there are new droplets available
-            ConcurrentLinkedQueue<byte[]> result = fountainCoder.getQueue();    //Queue with the output
+            ConcurrentLinkedQueue<DataBlock> result = fountainCoder.getQueue();    //Queue with the output
             long startTime = System.currentTimeMillis();
             fountainCoder.start();   //Start the encoder in a new thread
             int counter = 0;        //Count the number of droplets received
@@ -59,6 +66,7 @@ public class FountainEncoder extends Thread{
             FountainDecoder decoder = new FountainDecoder(parameters);  //Create a new decoder with the same parameters as the encoder
             boolean firstAcquire = true;
             Semaphore done = fountainCoder.getDoneLock();
+            LinkedList<DataBlock> acctualResult = new LinkedList<>();
             while (!done.tryAcquire() || result.peek() != null) {   //Run as long as we're getting blocks
                 boolean acquired = false;   //See if there are new blocks available
                 try {
@@ -69,10 +77,10 @@ public class FountainEncoder extends Thread{
 
                 if (acquired) { //We've gotten a new block
 
-                    byte[] block = result.poll();   //retrive the block
-                    totalSize = totalSize + block.length;
+                    DataBlock block = result.poll();   //retrive the block
+                    totalSize = totalSize + block.getData().length;
                     if (Math.random() > 0) {        //Throw away some files
-                        decoder.addBytes(block);      //Add the block to the decoder
+                        acctualResult.add(block);      //Add the block to the decoder
                     }
                     counter++;
                     if (counter % 5000 == 0)
@@ -81,6 +89,11 @@ public class FountainEncoder extends Thread{
 
             }
             results[i][0] = System.currentTimeMillis()-startTime;
+            //Shuffle the packets
+            Collections.shuffle(acctualResult);
+
+            acctualResult.forEach(decoder::addDataBlock);
+
             decoder.setParameters(parameters);
             startTime = System.currentTimeMillis();
             decoder.start();
@@ -112,7 +125,7 @@ public class FountainEncoder extends Thread{
         done = new Semaphore(0, false);
     }
 
-    public ConcurrentLinkedQueue<byte[]> getQueue() {
+    public ConcurrentLinkedQueue<DataBlock> getQueue() {
         return result;
     }
 
@@ -129,6 +142,7 @@ public class FountainEncoder extends Thread{
     }
     public void run() {
         System.out.println("The max length is " + MAX_DATA_LEN + " and the bytes to read is " + nrOfBytes);
+        FountainEncoder.nextBlockNumber = 0;
         byte[] data = null;
         try {
             data = Files.readAllBytes(pathToRead);
@@ -185,19 +199,24 @@ public class FountainEncoder extends Thread{
 
 class BlockEncoder extends Thread {
     int nrOfRepairSymbols = 0;
+    byte currentBlockNumber = 0;
+    int currentPacket = 0;
     int threadNumber;
     Iterator<SourceBlockEncoder> iterator;
     int blocksProcessed = 0;
     Lock iteratorLock;
     Semaphore availableDrops;
-    ConcurrentLinkedQueue<byte[]> result;
+    ConcurrentLinkedQueue<DataBlock> result;
 
     public void run() {
         while (true) {
             iteratorLock.lock();
             if (iterator.hasNext()) {
+                currentBlockNumber = FountainEncoder.nextBlockNumber;
+                FountainEncoder.nextBlockNumber++;
                 SourceBlockEncoder blockToEncode = iterator.next();
                 iteratorLock.unlock();
+                currentPacket = 0;
                 encodeSourceBlock(blockToEncode);
                 blocksProcessed++;
             } else {
@@ -209,7 +228,7 @@ class BlockEncoder extends Thread {
 
     }
 
-    public BlockEncoder(Iterator<SourceBlockEncoder> iterator, Lock iteratorLock, int threadNumber, Semaphore availableDrops, ConcurrentLinkedQueue<byte[]> result, int nrOfRepairSymbols) {
+    public BlockEncoder(Iterator<SourceBlockEncoder> iterator, Lock iteratorLock, int threadNumber, Semaphore availableDrops, ConcurrentLinkedQueue<DataBlock> result, int nrOfRepairSymbols) {
         this.threadNumber = threadNumber;
         this.iterator = iterator;
         this.iteratorLock = iteratorLock;
@@ -223,6 +242,7 @@ class BlockEncoder extends Thread {
         // send all source symbols
         for (EncodingPacket pac : sbEnc.sourcePacketsIterable()) {
             sendPacket(pac);
+            currentPacket++;
         }
 
         // number of repair symbols
@@ -230,6 +250,7 @@ class BlockEncoder extends Thread {
 
         // send nr repair symbols
         for (EncodingPacket pac : sbEnc.repairPacketsIterable(nr)) {
+            currentPacket++;
             sendPacket(pac);
         }
     }
@@ -239,7 +260,9 @@ class BlockEncoder extends Thread {
     }
 
     private void sendPacket(EncodingPacket pac) {
-        result.add(pac.asArray());
+        DataBlock newBlock = new DataBlock("Test",currentPacket,currentBlockNumber);
+        newBlock.setData(pac.asArray());
+        result.add(newBlock);
         availableDrops.release();
         // send the packet to the receiver
     }

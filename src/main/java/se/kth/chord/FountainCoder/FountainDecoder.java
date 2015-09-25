@@ -7,9 +7,10 @@ import net.fec.openrq.Parsed;
 import net.fec.openrq.decoder.DataDecoder;
 import net.fec.openrq.decoder.SourceBlockDecoder;
 import net.fec.openrq.parameters.FECParameters;
+import se.kth.chord.node.DataBlock;
 
-import java.util.Collection;
-import java.util.Iterator;
+import javax.xml.crypto.Data;
+import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.locks.ReentrantLock;
@@ -21,18 +22,19 @@ public class FountainDecoder extends Thread{
 
     FECParameters parameters;
     Semaphore availableBytes;
-    ConcurrentLinkedQueue<byte[]> byteQueue;
+    ConcurrentLinkedQueue<LinkedList<DataBlock>> workQueue;
+    LinkedList<DataBlock> byteQueue;
     BlockDecoder [] decoders = null;
-    public FountainDecoder(Collection<byte[]> bytesToDecode, FECParameters parameters){
+    public FountainDecoder(Collection<DataBlock> bytesToDecode, FECParameters parameters){
         this.parameters = parameters;
         this.availableBytes = new Semaphore(bytesToDecode.size(),true);
-        this.byteQueue = new ConcurrentLinkedQueue<>(bytesToDecode);
+        this.byteQueue = new LinkedList<>(bytesToDecode);
     }
 
     public FountainDecoder(FECParameters parameters){
         this.parameters = parameters;
         this.availableBytes = new Semaphore(0, true);
-        this.byteQueue = new ConcurrentLinkedQueue<>();
+        this.byteQueue = new LinkedList<>();
     }
 
     @Override
@@ -46,11 +48,21 @@ public class FountainDecoder extends Thread{
         DataDecoder decoder = OpenRQ.newDecoder(parameters,1); // 0 = 99% probability of success, 1 = 99.99% probability, 2 = 99.9999% probability. This is only for performance reasons.
         Iterator<SourceBlockDecoder> sourceIterator = decoder.sourceBlockIterable().iterator();
         int nrOfThreads = Math.min(decoder.numberOfSourceBlocks(), FountainEncoder.NR_OF_THREADS);
+        Collections.sort(byteQueue);
+        workQueue = new ConcurrentLinkedQueue<>();
+        while(!byteQueue.isEmpty()){
+            int newSequenceNumber = byteQueue.peek().getSourceBlockNumber()+1;
+            LinkedList<DataBlock> sourceList = new LinkedList<>();
+            while(!byteQueue.isEmpty() && byteQueue.peek().getSourceBlockNumber()<newSequenceNumber){
+                sourceList.add(byteQueue.poll());
+            }
+            workQueue.add(sourceList);
+        }
         decoders = new BlockDecoder[nrOfThreads];
         ReentrantLock sourceIteratorLock = new ReentrantLock();
         ReentrantLock decoderLock = new ReentrantLock();
         for(int i = 0; i<nrOfThreads; i++){
-            decoders[i] = new BlockDecoder(sourceIterator, sourceIteratorLock, byteQueue,decoder,decoderLock,i, availableBytes); //The threads start in the constructor
+            decoders[i] = new BlockDecoder(sourceIterator, sourceIteratorLock, workQueue,decoder,decoderLock,i, availableBytes); //The threads start in the constructor
         }
         try {
             for (int i = 0; i < nrOfThreads; i++) {
@@ -70,27 +82,15 @@ public class FountainDecoder extends Thread{
             System.out.println("The file couldn't be recovered");
         }
     }
-    public void addBytes(byte [] arrayToAdd){
-        this.byteQueue.add(arrayToAdd);
+    public void addDataBlock(DataBlock blockToAdd){
+        this.byteQueue.add(blockToAdd);
         availableBytes.release();
-    }
-    public void interruptDecoding(){
-        if(decoders!=null){
-            for(int i = 0; i<decoders.length; i++){
-                decoders[i].interruptThread();
-            }
-            byteQueue.notifyAll();
-        }
-        else{
-            System.out.println("Decoding hasn't started");
-        }
-
     }
 }
 class BlockDecoder extends Thread {
     ReentrantLock sourceIteratorLock;
     Iterator<SourceBlockDecoder> sourceIterator;
-    ConcurrentLinkedQueue<byte[]> bytesToRead;
+    ConcurrentLinkedQueue<LinkedList<DataBlock>> bytesToRead;
     DataDecoder decoder;
     ReentrantLock decoderLock;
     Semaphore availableBytes;
@@ -100,19 +100,22 @@ class BlockDecoder extends Thread {
         sourceIteratorLock.lock();
         while(sourceIterator.hasNext()){
             SourceBlockDecoder nextBlock = sourceIterator.next();
+            LinkedList<DataBlock> nextSource = bytesToRead.poll();
+
             sourceIteratorLock.unlock();
-            decodeSourceBlock(nextBlock);
+            if(nextSource != null) {
+                decodeSourceBlock(nextBlock, nextSource);
+            }
+            else{
+                System.out.println("Something went horribly wrong");
+            }
             sourceIteratorLock.lock();
         }
         sourceIteratorLock.unlock();
         System.out.println("Decoding thread nr" + threadNumber + " has finished decoding");
     }
 
-    public void interruptThread(){
-        this.interrupted = true;
-        this.interruptThread();
-    }
-    public BlockDecoder(Iterator<SourceBlockDecoder> sourceIterator, ReentrantLock sourceIteratorLock, ConcurrentLinkedQueue<byte[]> bytesToRead, DataDecoder decoder, ReentrantLock decoderLock, int threadNumber, Semaphore availableBytes) {
+    public BlockDecoder(Iterator<SourceBlockDecoder> sourceIterator, ReentrantLock sourceIteratorLock, ConcurrentLinkedQueue<LinkedList<DataBlock>> bytesToRead, DataDecoder decoder, ReentrantLock decoderLock, int threadNumber, Semaphore availableBytes) {
         this.sourceIterator = sourceIterator;
         this.sourceIteratorLock = sourceIteratorLock;
         this.bytesToRead = bytesToRead;
@@ -123,14 +126,14 @@ class BlockDecoder extends Thread {
         this.start();
     }
 
-    private void decodeSourceBlock(SourceBlockDecoder sourceBlock) {
+    private void decodeSourceBlock(SourceBlockDecoder sourceBlock, LinkedList<DataBlock> nextSource) {
         while(!sourceBlock.isSourceBlockDecoded()) {
             if(interrupted){
                 System.out.println("Thread nr " + threadNumber + " has been interrupted");
                 break;
             }
-            byte[] block = bytesToRead.poll();
-            if(block == null){
+            DataBlock nextBlock  = nextSource.poll();
+            if(nextSource == null){
                 try {
                     availableBytes.acquire();
                 } catch (InterruptedException e) {
@@ -139,7 +142,7 @@ class BlockDecoder extends Thread {
             }
             else {
                 decoderLock.lock();
-                Parsed<EncodingPacket> parsedPacket = decoder.parsePacket(block, false);
+                Parsed<EncodingPacket> parsedPacket = decoder.parsePacket(nextBlock.getData(), false);
                 decoderLock.unlock();
                 if (parsedPacket.failureReason().length() < 1) {
                     try {
@@ -147,7 +150,7 @@ class BlockDecoder extends Thread {
 
                     } catch (IllegalArgumentException e) {
                         //(If it doesn't belong to this packet we throw it back.
-                        bytesToRead.add(block);
+                        nextSource.add(nextBlock);
                         availableBytes.release();
                     }
                 }

@@ -9,7 +9,7 @@ import java.util.Set;
 /**
  * Created by joakim on 2015-09-13.
  */
-public class DataBlock implements Serializable{
+public class DataBlock implements Serializable, Comparable {
     String filename;
     int sequenceNumber;
     byte sourceBlockNumber;
@@ -51,4 +51,22 @@ public class DataBlock implements Serializable{
         this.filename = filename;
     }
 
+    @Override
+    public int compareTo(Object o) {
+        if (!(o instanceof DataBlock))
+            throw new ClassCastException("Tried to compare to something that isn't a DataBlock");
+        if(this.sourceBlockNumber>((DataBlock) o).sourceBlockNumber)
+            return 1;
+        else if(this.sourceBlockNumber<((DataBlock) o).sourceBlockNumber)
+            return -1;
+        else{
+            if(this.sequenceNumber>((DataBlock) o).sequenceNumber){
+                return 1;
+            }
+            else if(this.sequenceNumber<((DataBlock) o).sequenceNumber){
+                return -1;
+            }
+        }
+        return 0;
+    }
 }
