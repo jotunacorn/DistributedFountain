@@ -542,11 +542,58 @@ public class NodeComp extends ComponentDefinition {
             }
         }
     };
-    private Handler<NetRetrieveFile> handleRetreiveFile = new Handler<NetRetrieveFile>() {
+    private Handler<NetRetrieveFile> handleRetrieveFile = new Handler<NetRetrieveFile>() {
         @Override
-        public void handle(NetRetrieveFile retriveFile) {
+        public void handle(NetRetrieveFile retrieveFile) {
 
         }
+    };
+    
+    private Handler<NetRemoveFile> handleRemoveFile = new Handler<NetRemoveFile>() {
+        @Override
+        public void handle(NetRemoveFile RemoveFile) {
+
+        }
+    };
+    
+    private Handler<NetAddOriginalFile> handleAddOriginalFile = new Handler<NetAddOriginalFile>() {
+
+		@Override
+		public void handle(NetAddOriginalFile arg0) {
+			// TODO Auto-generated method stub
+			
+		}
+    	// Locate the original file (via file path provided in message)
+    	// Split the file into droplets
+    	// Send droplets to alive nodes for desired redundancy.
+    
+    };
+    
+    private Handler<NetRetrieveOriginalFile> handleRetrieveOriginalFile = new Handler<NetRetrieveOriginalFile>() {
+
+		@Override
+		public void handle(NetRetrieveOriginalFile arg0) {
+			// TODO Auto-generated method stub
+			
+		}
+    	// Locate the original file (via file name provided in message)
+    	// Gather droplets
+		// Decode file
+    	// Send file to requester.
+    
+    };
+    
+    private Handler<NetRemoveOriginalFile> handleRemoveOriginalFile = new Handler<NetRemoveOriginalFile>() {
+
+		@Override
+		public void handle(NetRemoveOriginalFile arg0) {
+			// TODO Auto-generated method stub
+			
+		}
+    	// Locate the original file (via file name provided in message)
+    	// Remove droplets
+    	// Send file to requester.
+    
     };
 
 }
