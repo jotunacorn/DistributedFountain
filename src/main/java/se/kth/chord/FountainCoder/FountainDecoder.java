@@ -19,7 +19,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * Created by joakim on 2015-09-20.
  */
 public class FountainDecoder extends Thread{
-
+    boolean success = false;
     FECParameters parameters;
     Semaphore availableBytes;
     ConcurrentLinkedQueue<LinkedList<DataBlock>> workQueue;
@@ -76,11 +76,15 @@ public class FountainDecoder extends Thread{
             System.exit(-3);
         }
         if(decoder.isDataDecoded()){
-            System.out.println("The whole file was successfully recovered");
+            //System.out.println("The whole file was successfully recovered");
+            success = true;
         }
         else{
-            System.out.println("The file couldn't be recovered");
+            //System.out.println("The file couldn't be recovered");
         }
+    }
+    public boolean success(){
+        return success;
     }
     public void addDataBlock(DataBlock blockToAdd){
         this.byteQueue.add(blockToAdd);
@@ -107,12 +111,12 @@ class BlockDecoder extends Thread {
                 decodeSourceBlock(nextBlock, nextSource);
             }
             else{
-                System.out.println("Something went horribly wrong");
+                //System.out.println("Something went horribly wrong");
             }
             sourceIteratorLock.lock();
         }
         sourceIteratorLock.unlock();
-        System.out.println("Decoding thread nr" + threadNumber + " has finished decoding");
+        //System.out.println("Decoding thread nr" + threadNumber + " has finished decoding");
     }
 
     public BlockDecoder(Iterator<SourceBlockDecoder> sourceIterator, ReentrantLock sourceIteratorLock, ConcurrentLinkedQueue<LinkedList<DataBlock>> bytesToRead, DataDecoder decoder, ReentrantLock decoderLock, int threadNumber, Semaphore availableBytes) {
@@ -128,17 +132,10 @@ class BlockDecoder extends Thread {
 
     private void decodeSourceBlock(SourceBlockDecoder sourceBlock, LinkedList<DataBlock> nextSource) {
         while(!sourceBlock.isSourceBlockDecoded()) {
-            if(interrupted){
-                System.out.println("Thread nr " + threadNumber + " has been interrupted");
-                break;
-            }
             DataBlock nextBlock  = nextSource.poll();
-            if(nextSource == null){
-                try {
-                    availableBytes.acquire();
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
+            if(nextSource == null || nextBlock == null){
+                //System.out.println("Thread number " + threadNumber + " were unable to decode a sourceblock");
+                break;
             }
             else {
                 decoderLock.lock();
@@ -149,13 +146,11 @@ class BlockDecoder extends Thread {
                         sourceBlock.putEncodingPacket(parsedPacket.value());
 
                     } catch (IllegalArgumentException e) {
-                        //(If it doesn't belong to this packet we throw it back.
-                        nextSource.add(nextBlock);
-                        availableBytes.release();
+                        //System.out.println("A packet in thread number " + threadNumber + " were sorted wrong. This is bad.");
                     }
                 }
                 else{
-                    System.out.println("Failure in thread nr " + threadNumber + " with message:" + parsedPacket.failureReason());
+                    //System.out.println("Failure in thread nr " + threadNumber + " with message:" + parsedPacket.failureReason());
                 }
             }
         }

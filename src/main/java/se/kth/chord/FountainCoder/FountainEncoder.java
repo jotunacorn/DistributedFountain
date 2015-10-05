@@ -23,14 +23,12 @@ import static net.fec.openrq.parameters.ParameterChecker.minDataLength;
 import net.fec.openrq.parameters.FECParameters;
 import se.kth.chord.node.DataBlock;
 
-import javax.xml.crypto.Data;
+
+public class FountainEncoder extends Thread {
 
 
-public class FountainEncoder extends Thread{
-
-
-    private static final int BYTES_TO_READ = 32 * 1024 * 1024;
-    private static final int NR_OF_RUNS = 4;
+    private static final int BYTES_TO_READ = 128 * 1024 * 1024;
+    private static final int NR_OF_RUNS = 102;
     private ConcurrentLinkedQueue<DataBlock> result;
     private Semaphore availableDrops;
     private Semaphore done;
@@ -45,17 +43,18 @@ public class FountainEncoder extends Thread{
     //The number of sourceblocks needed
     private static final int NR_OF_SOURCEBLOCKS = 8; //If number of partitions is less than number of threads less threads will be used.
     // Fixed value for the symbol size
-    private static final int SYMB_SIZE = 8*(1500 - 20 - 8); // X * (UDP-Ipv4 payload length)
+    private static final int SYMB_SIZE = 8 * (1500 - 20 - 8); // X * (UDP-Ipv4 payload length)
     // The maximum allowed data length, given the parameter above
     public static final long MAX_DATA_LEN = maxAllowedDataLength(SYMB_SIZE);
     // The redundancy in the system. This number should be higher than the anticipated loss. Chance of loss also increase with NR_OF_SOURCEBLOCKS
-    public static final double ESTIMATED_LOSS = 0.5;
+    public static final double ESTIMATED_LOSS = 0.325;
 
     //A simple usage sample for receiving droplets via a queue
     public static void main(String[] args) {
-        long [][] results = new long[NR_OF_RUNS][2];
-
-        for( int i = 0; i<NR_OF_RUNS; i++) {
+        long[][] results = new long[NR_OF_RUNS][2];
+        boolean success[] = new boolean[NR_OF_RUNS];
+        double chanceOfLoss = (double) 1 / (double) 3;
+        for (int i = 0; i < NR_OF_RUNS; i++) {
             FountainEncoder fountainCoder = new FountainEncoder(Paths.get("C:\\Users\\joakim\\Downloads\\ubuntu-14.04.3-server-i386.iso"), BYTES_TO_READ); //New encoder with a Path to read
             Semaphore s = fountainCoder.dropsletsSemaphore();   //Semaphore to see if there are new droplets available
             ConcurrentLinkedQueue<DataBlock> result = fountainCoder.getQueue();    //Queue with the output
@@ -79,41 +78,49 @@ public class FountainEncoder extends Thread{
 
                     DataBlock block = result.poll();   //retrive the block
                     totalSize = totalSize + block.getData().length;
-                    if (Math.random() > 0) {        //Throw away some files
+                    //if (Math.random() > (chanceOfLoss)) {        //Throw away some files
                         acctualResult.add(block);      //Add the block to the decoder
-                    }
+                    //}
                     counter++;
-                    if (counter % 5000 == 0)
-                        System.out.println("Received block nr " + counter);
+                    //if (counter % 5000 == 0)  System.out.println("Received block nr " + counter);
                 }
 
             }
-            results[i][0] = System.currentTimeMillis()-startTime;
+            results[i][0] = System.currentTimeMillis() - startTime;
             //Shuffle the packets
-            Collections.shuffle(acctualResult);
+            //Collections.shuffle(acctualResult);
 
             acctualResult.forEach(decoder::addDataBlock);
 
             decoder.setParameters(parameters);
-            startTime = System.currentTimeMillis();
+            startTime = System.nanoTime();
             decoder.start();
-            System.out.println(i +">All blocks (" + counter + ") received at main. The encoded files are " + totalSize / 1000000 + "MB. It took " + results[i][0] + " ms");
+           // System.out.println(i + ">All blocks (" + counter + ") received at main. The encoded files are " + totalSize / 1000000 + "MB. It took " + results[i][0] + " ms");
             long time = System.currentTimeMillis();
             try {
                 decoder.join();
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
-            results[i][1] = System.currentTimeMillis()-startTime;
-            System.out.println("Done with decoding. The decoding was done in " + results[i][1]+ "ms.");
+            results[i][1] = System.nanoTime() - startTime;
+            //System.out.println("Done with decoding. The decoding was done in " + results[i][1] / 1000000 + "ms.");
+            success[i] = decoder.success();
         }
-        System.out.println("Encoding time");
-        for(int i = 0; i<NR_OF_RUNS; i++){
-            System.out.println(results[i][0]);
+        //System.out.println("Encoding time");
+        for (int i = 0; i < NR_OF_RUNS; i++) {
+           // System.out.println(results[i][0]);
         }
         System.out.println("Decoding time");
-        for(int i = 0; i<NR_OF_RUNS; i++){
-            System.out.println(results[i][1]);
+        for (int i = 0; i < NR_OF_RUNS; i++) {
+            //System.out.println(results[i][1] / 1000000);
+        }
+        System.out.println("Successes");
+        for (int i = 0; i < NR_OF_RUNS; i++) {
+            if (success[i]) {
+               // System.out.println(1);
+            } else {
+               // System.out.println(0);
+            }
         }
     }
 
@@ -137,11 +144,12 @@ public class FountainEncoder extends Thread{
         return this.done;
     }
 
-    public FECParameters getParameters(){
+    public FECParameters getParameters() {
         return parameters;
     }
+
     public void run() {
-        System.out.println("The max length is " + MAX_DATA_LEN + " and the bytes to read is " + nrOfBytes);
+        //System.out.println("The max length is " + MAX_DATA_LEN + " and the bytes to read is " + nrOfBytes);
         FountainEncoder.nextBlockNumber = 0;
         byte[] data = null;
         try {
@@ -150,17 +158,17 @@ public class FountainEncoder extends Thread{
             e.printStackTrace();
         }
         parameters = getParameters(nrOfBytes);
-        System.out.println("Created parameters with \n " +
-                "Symbolsize:" + parameters.symbolSize() +
-                "\n Datalength:" + parameters.dataLengthAsInt() +
-                "\n NumberOfSourceBlocks:" + parameters.numberOfSourceBlocks() +
-                "\n TotalSymbols:" + parameters.totalSymbols());
-        int nrOfRepairSymbols=OpenRQ.minRepairSymbols(parameters.totalSymbols(), 0, ESTIMATED_LOSS);
-        System.out.println("The number of symbols needed to be transmitted are " + nrOfRepairSymbols + "(" + String.format("%.2f",((double)nrOfRepairSymbols/(double)parameters.totalSymbols())*100) + "%)" );
-        nrOfRepairSymbols = (nrOfRepairSymbols/NR_OF_SOURCEBLOCKS)+1;
+//        System.out.println("Created parameters with \n " +
+//                "Symbolsize:" + parameters.symbolSize() +
+//                "\n Datalength:" + parameters.dataLengthAsInt() +
+//                "\n NumberOfSourceBlocks:" + parameters.numberOfSourceBlocks() +
+//                "\n TotalSymbols:" + parameters.totalSymbols());
+        int nrOfRepairSymbols = OpenRQ.minRepairSymbols(parameters.totalSymbols(), 0, ESTIMATED_LOSS);
+        //System.out.println("The number of symbols needed to be transmitted are " + nrOfRepairSymbols + "(" + String.format("%.2f", ((double) nrOfRepairSymbols / (double) parameters.totalSymbols()) * 100) + "%)");
+        nrOfRepairSymbols = (nrOfRepairSymbols / NR_OF_SOURCEBLOCKS) + 1;
         DataEncoder encoder = OpenRQ.newEncoder(data, parameters);
         Iterator<SourceBlockEncoder> iter = encoder.sourceBlockIterable().iterator();
-        System.out.println("Starting encoding process");
+        //System.out.println("Starting encoding process");
         long time = System.currentTimeMillis();
         BlockEncoder[] encoders = new BlockEncoder[NR_OF_THREADS];
         Lock l = new ReentrantLock();
@@ -181,7 +189,7 @@ public class FountainEncoder extends Thread{
         }
         long finishTime = (System.currentTimeMillis() - time);
         done.release();
-        System.out.println("Finished with encoding " + nrOfBytes / (1024 * 1024) + "MiB in " + finishTime + "ms. Average " + nrOfBytes/(finishTime * 1024) + " MB/s");
+        //System.out.println("Finished with encoding " + nrOfBytes / (1024 * 1024) + "MiB in " + finishTime + "ms. Average " + nrOfBytes / (finishTime * 1024) + " MB/s");
     }
 
     public static FECParameters getParameters(long dataLen) {
@@ -193,7 +201,6 @@ public class FountainEncoder extends Thread{
 
         return FECParameters.newParameters(dataLen, SYMB_SIZE, NR_OF_SOURCEBLOCKS);
     }
-
 }
 
 
@@ -221,7 +228,7 @@ class BlockEncoder extends Thread {
                 blocksProcessed++;
             } else {
                 iteratorLock.unlock();
-                System.out.println("Thread number " + threadNumber + " is done. It has processed " + blocksProcessed + " blocks");
+                //System.out.println("Thread number " + threadNumber + " is done. It has processed " + blocksProcessed + " blocks");
                 break;
             }
         }
@@ -238,7 +245,6 @@ class BlockEncoder extends Thread {
     }
 
     private void encodeSourceBlock(SourceBlockEncoder sbEnc) {
-
         // send all source symbols
         for (EncodingPacket pac : sbEnc.sourcePacketsIterable()) {
             sendPacket(pac);
@@ -260,11 +266,23 @@ class BlockEncoder extends Thread {
     }
 
     private void sendPacket(EncodingPacket pac) {
-        DataBlock newBlock = new DataBlock("Test",currentPacket,currentBlockNumber);
+        DataBlock newBlock = new DataBlock("Test", currentPacket, currentBlockNumber);
         newBlock.setData(pac.asArray());
         result.add(newBlock);
         availableDrops.release();
         // send the packet to the receiver
     }
 
+    private double[] dennisAverage() {
+        int base = 2;
+        int exp = 1;
+        int k = 1;
+        int numbers = 10;
+        double [] weights = new double[numbers];
+
+        for( int i = 0; i<weights.length; i++){
+            weights[i] = k*i*Math.pow(base,exp*i);
+        }
+        return weights;
+    }
 }
