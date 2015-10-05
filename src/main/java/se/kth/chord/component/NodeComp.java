@@ -633,7 +633,7 @@ public class NodeComp extends ComponentDefinition {
 				Set<DataBlock> blocks = new HashSet<>();
 				// ==== ENCODE CODE ====
 	            FountainEncoder fountainCoder = new FountainEncoder(FILEPATH, BYTES_TO_READ); //New encoder with a Path to read
-	            Semaphore s = fountainCoder.dropletsSemaphore();   //Semaphore to see if there are new droplets available
+	            Semaphore s = fountainCoder.dropsletsSemaphore();   //Semaphore to see if there are new droplets available
 	            ConcurrentLinkedQueue<DataBlock> result = fountainCoder.getQueue();    //Queue with the output
 	            long startTime = System.currentTimeMillis();
 	            fountainCoder.start();   //Start the encoder in a new thread
@@ -736,10 +736,10 @@ public class NodeComp extends ComponentDefinition {
 			blocks.addAll(storedData.get(filename));
 			
 			// Decode file
-			FountainDecoder decoder = new FountainDecoder(FountainEncoder.getParameters(FountainEncoder.getBytesToRead()));  //Create a new decoder with the same parameters as the encoder
+			FountainDecoder decoder = new FountainDecoder(FountainEncoder.getParameters(FountainEncoder.MAX_DATA_LEN));  //Create a new decoder with the same parameters as the encoder
             blocks.forEach(decoder::addDataBlock);
 
-            decoder.setParameters(FountainEncoder.getParameters(FountainEncoder.getBytesToRead()));
+            decoder.setParameters(FountainEncoder.getParameters(FountainEncoder.MAX_DATA_LEN));
             decoder.start();
             try {
                 decoder.join();

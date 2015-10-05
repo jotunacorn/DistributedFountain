@@ -45,7 +45,7 @@ public class FountainEncoder extends Thread {
     // Fixed value for the symbol size
     private static final int SYMB_SIZE = 8 * (1500 - 20 - 8); // X * (UDP-Ipv4 payload length)
     // The maximum allowed data length, given the parameter above
-    public static final long MAX_DATA_LEN = maxAllowedDataLength(SYMB_SIZE);
+    public static  long MAX_DATA_LEN = maxAllowedDataLength(SYMB_SIZE);
     // The redundancy in the system. This number should be higher than the anticipated loss. Chance of loss also increase with NR_OF_SOURCEBLOCKS
     public static final double ESTIMATED_LOSS = 0.325;
 
