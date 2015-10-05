@@ -97,7 +97,7 @@ public class AggregatorComp extends ComponentDefinition {
         @Override
         public void handle(NetStatus status) {
             if (ENABLE_LOGGING) {
-                log.info("{} status nr:{} from:{} received-pings:{} sent-pings:{}, Alive nodes: {}", new Object[]{selfAddress.getId(), status.getContent().statusNr, status.getHeader().getSource(), status.getContent().receivedPings, status.getContent().sentPings, status.getContent().getAliveNodes()});
+                //log.info("{} status nr:{} from:{} received-pings:{} sent-pings:{}, Alive nodes: {}", new Object[]{selfAddress.getId(), status.getContent().statusNr, status.getHeader().getSource(), status.getContent().receivedPings, status.getContent().sentPings, status.getContent().getAliveNodes()});
             }
 
             //Put the status in the appropriate HashMap for later.
@@ -172,12 +172,12 @@ public class AggregatorComp extends ComponentDefinition {
                 convergenceRate = 1 / convergenceRate;
             }
 
-            log.info("Number of alive nodes: " + commonAliveNodes.size() + ", Number of alive nodes: " + allAliveNodes.size());
+            //log.info("Number of alive nodes: " + commonAliveNodes.size() + ", Number of alive nodes: " + allAliveNodes.size());
             convergenceByStatusNr.put(statusNr, convergenceRate);
         }
 
         for (int statusNr : convergenceByStatusNr.keySet()) {
-            NodeComp.log.info("Convergence at iteration {}: {}", statusNr, convergenceByStatusNr.get(statusNr));
+            //NodeComp.log.info("Convergence at iteration {}: {}", statusNr, convergenceByStatusNr.get(statusNr));
             writer.println(convergenceByStatusNr.get(statusNr).toString().replace(".", ","));
         }
         writer.close();

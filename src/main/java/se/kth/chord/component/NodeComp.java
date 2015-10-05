@@ -563,7 +563,7 @@ public class NodeComp extends ComponentDefinition {
     }
     
     private void scheduleAddOrigFile() {
-        ScheduleTimeout st = new ScheduleTimeout(500);
+        ScheduleTimeout st = new ScheduleTimeout(700);
         AddTimeout at = new AddTimeout(st);
         st.setTimeoutEvent(at);
         trigger(st, timer);
