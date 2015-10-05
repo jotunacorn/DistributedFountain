@@ -34,7 +34,7 @@ public class FountainEncoder extends Thread{
     private ConcurrentLinkedQueue<DataBlock> result;
     private Semaphore availableDrops;
     private Semaphore done;
-    private Path pathToRead = Paths.get("C:\\Users\\joakim\\Downloads\\ubuntu-14.04.3-server-i386.iso");
+    private Path pathToRead;
     private static FECParameters parameters = null;
 
     private int nrOfBytes = 0;
@@ -50,6 +50,10 @@ public class FountainEncoder extends Thread{
     public static final long MAX_DATA_LEN = maxAllowedDataLength(SYMB_SIZE);
     // The redundancy in the system. This number should be higher than the anticipated loss. Chance of loss also increase with NR_OF_SOURCEBLOCKS
     public static final double ESTIMATED_LOSS = 0.5;
+    
+    public static int getBytesToRead() {
+    	return BYTES_TO_READ;
+    }
 
     //A simple usage sample for receiving droplets via a queue
     public static void main(String[] args) {
@@ -57,7 +61,7 @@ public class FountainEncoder extends Thread{
 
         for( int i = 0; i<NR_OF_RUNS; i++) {
             FountainEncoder fountainCoder = new FountainEncoder(Paths.get("C:\\Users\\joakim\\Downloads\\ubuntu-14.04.3-server-i386.iso"), BYTES_TO_READ); //New encoder with a Path to read
-            Semaphore s = fountainCoder.dropsletsSemaphore();   //Semaphore to see if there are new droplets available
+            Semaphore s = fountainCoder.dropletsSemaphore();   //Semaphore to see if there are new droplets available
             ConcurrentLinkedQueue<DataBlock> result = fountainCoder.getQueue();    //Queue with the output
             long startTime = System.currentTimeMillis();
             fountainCoder.start();   //Start the encoder in a new thread
@@ -129,7 +133,7 @@ public class FountainEncoder extends Thread{
         return result;
     }
 
-    public Semaphore dropsletsSemaphore() {
+    public Semaphore dropletsSemaphore() {
         return availableDrops;
     }
 
@@ -165,7 +169,7 @@ public class FountainEncoder extends Thread{
         BlockEncoder[] encoders = new BlockEncoder[NR_OF_THREADS];
         Lock l = new ReentrantLock();
         for (int i = 0; i < NR_OF_THREADS; i++) {
-            encoders[i] = new BlockEncoder(iter, l, i, availableDrops, result, nrOfRepairSymbols);
+            encoders[i] = new BlockEncoder(iter, l, i, availableDrops, result, nrOfRepairSymbols, pathToRead.getFileName().toString());
             encoders[i].start();
         }
         try {
@@ -207,6 +211,7 @@ class BlockEncoder extends Thread {
     Lock iteratorLock;
     Semaphore availableDrops;
     ConcurrentLinkedQueue<DataBlock> result;
+    String filename;
 
     public void run() {
         while (true) {
@@ -228,13 +233,14 @@ class BlockEncoder extends Thread {
 
     }
 
-    public BlockEncoder(Iterator<SourceBlockEncoder> iterator, Lock iteratorLock, int threadNumber, Semaphore availableDrops, ConcurrentLinkedQueue<DataBlock> result, int nrOfRepairSymbols) {
+    public BlockEncoder(Iterator<SourceBlockEncoder> iterator, Lock iteratorLock, int threadNumber, Semaphore availableDrops, ConcurrentLinkedQueue<DataBlock> result, int nrOfRepairSymbols, String filename) {
         this.threadNumber = threadNumber;
         this.iterator = iterator;
         this.iteratorLock = iteratorLock;
         this.availableDrops = availableDrops;
         this.result = result;
         this.nrOfRepairSymbols = nrOfRepairSymbols;
+        this.filename = filename;
     }
 
     private void encodeSourceBlock(SourceBlockEncoder sbEnc) {
@@ -260,7 +266,7 @@ class BlockEncoder extends Thread {
     }
 
     private void sendPacket(EncodingPacket pac) {
-        DataBlock newBlock = new DataBlock("Test",currentPacket,currentBlockNumber);
+        DataBlock newBlock = new DataBlock(filename,currentPacket,currentBlockNumber);
         newBlock.setData(pac.asArray());
         result.add(newBlock);
         availableDrops.release();

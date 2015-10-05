@@ -20,9 +20,11 @@ package se.kth.chord.component;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import se.kth.chord.FountainCoder.FountainDecoder;
+import se.kth.chord.FountainCoder.FountainEncoder;
 import se.kth.chord.component.init.NodeInit;
 import se.kth.chord.msg.Pong;
-import se.kth.chord.msg.AddFile;
 import se.kth.chord.msg.RetrieveFile;
 import se.kth.chord.msg.Status;
 import se.kth.chord.msg.net.*;
@@ -32,7 +34,6 @@ import se.kth.chord.node.DataBlock;
 import se.kth.chord.node.NodeHandler;
 import se.kth.chord.timeout.*;
 import se.sics.kompics.*;
-import se.sics.kompics.network.Address;
 import se.sics.kompics.network.Network;
 import se.sics.kompics.timer.CancelTimeout;
 import se.sics.kompics.timer.SchedulePeriodicTimeout;
@@ -40,11 +41,16 @@ import se.sics.kompics.timer.ScheduleTimeout;
 import se.sics.kompics.timer.Timer;
 import se.sics.p2ptoolbox.util.network.NatedAddress;
 
-import javax.xml.crypto.Data;
+import java.io.File;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 
-@SuppressWarnings("FieldCanBeLocal")
+
 public class NodeComp extends ComponentDefinition {
 
     //  ----- VARIABLES AND SETTINGS USED FOR THE SWIM SYSTEM ----
@@ -56,6 +62,7 @@ public class NodeComp extends ComponentDefinition {
     private static final int K = 4; //K value, how many nodes we K-ping if we suspect a node.
     public static final int PIGGYBACK_MESSAGE_SIZE = 9999999; //How many nodes piggybacked in each pong.
     public static final int LAMBDA = 3; //How many times the node change is piggybacked. Lambda * log(n)
+    private static final int BYTES_TO_READ = 32 * 1024 * 1024;
     public static final Logger log = LoggerFactory.getLogger(NodeComp.class);
     private Positive<Network> network = requires(Network.class);
     private Positive<Timer> timer = requires(Timer.class);
@@ -70,6 +77,8 @@ public class NodeComp extends ComponentDefinition {
     private int receivedPings = 0;
     private int incarnationCounter = 0;
     private int sentStatuses = 0;
+    
+    private final String ORIGINAL_FILE = "C:\\Users\\Douglas\\Downloads\\OpenELEC-Generic.x86_64-5.95.5.img";
 
     //The NodeHandler is holding all information about nodes in the system.
     //It provides an API to get and set nodes to the different lists in a consistent way.
@@ -81,7 +90,14 @@ public class NodeComp extends ComponentDefinition {
     private Map<Integer, Integer> kPingNrToPingNrMapping;
 
     //DATA STORAGE STUFF
+    // TODO(Douglas): BUG! Cannot store multiple files with same filename. Hash the names?
     HashMap<String, Set<DataBlock>> storedData;
+    
+    // List to keep track of nodes 
+    private volatile List<NatedAddress> nodeWaitList = new ArrayList<>();
+    
+    // Map of blocks used to decode file
+    private volatile Map<String, Set<DataBlock>> fileDataBlocks = new HashMap<>();
 
     public NodeComp(NodeInit init) {
         if (ENABLE_LOGGING) {
@@ -123,6 +139,16 @@ public class NodeComp extends ComponentDefinition {
         subscribe(handlePongTimeout, timer);
         subscribe(handleSuspectedTimeout, timer);
         subscribe(handleDeadTimeout, timer);
+        
+        // FS subs
+        subscribe(handleAddFile, network);
+        subscribe(handleRemoveFile, network);
+        subscribe(handleRetrieveFile, network);
+        subscribe(handleAddOriginalFile, network);
+        subscribe(handleRemoveOriginalFile, network);
+        subscribe(handleRetrieveOriginalFile, network);
+        subscribe(handleSendDataBlocks, network);
+        subscribe(handleAddTimeout, timer);
     }
 
     /**
@@ -139,6 +165,8 @@ public class NodeComp extends ComponentDefinition {
 
             schedulePeriodicPing();
             schedulePeriodicStatus();
+            if (selfAddress.getId() == 12)
+            	scheduleAddOrigFile();
         }
 
     };
@@ -497,6 +525,14 @@ public class NodeComp extends ComponentDefinition {
             }
         }
     };
+    
+    private Handler<AddTimeout> handleAddTimeout = new Handler<AddTimeout>() {
+
+        @Override
+        public void handle(AddTimeout addTimeout) {
+            trigger(new NetAddOriginalFile(selfAddress, selfAddress, ORIGINAL_FILE), network);
+        }
+    };
 
     private void schedulePeriodicPing() {
         SchedulePeriodicTimeout spt = new SchedulePeriodicTimeout(1000, 1000);
@@ -525,34 +561,60 @@ public class NodeComp extends ComponentDefinition {
         trigger(cpt, timer);
         statusTimeoutId = null;
     }
+    
+    private void scheduleAddOrigFile() {
+        ScheduleTimeout st = new ScheduleTimeout(500);
+        AddTimeout at = new AddTimeout(st);
+        st.setTimeoutEvent(at);
+        trigger(st, timer);
+    }
 
     //---FILE STORAGE STUFF---
     private Handler<NetAddFile> handleAddFile = new Handler<NetAddFile>() {
 
         @Override
         public void handle(NetAddFile file) {
-            if(storedData.containsKey(file.getContent().getDataBlock().getFilename())){
-                Set<DataBlock> storedFiles = storedData.get(file.getContent().getDataBlock().getFilename());
-                storedFiles.add(file.getContent().getDataBlock());
+        	// Append the blocks to the existing collection
+            if(storedData.containsKey(file.getContent().getFilename())){
+                Set<DataBlock> storedFiles = storedData.get(file.getContent().getFilename());
+                storedFiles.addAll(file.getContent().getDataBlocks());
             }
+            // Create new collection to house the data blocks
             else{
                 Set<DataBlock> newSet = new HashSet<>();
-                newSet.add(file.getContent().getDataBlock());
-                storedData.put(file.getContent().getDataBlock().getFilename(), newSet);
+                newSet.addAll(file.getContent().getDataBlocks());
+                storedData.put(file.getContent().getFilename(), newSet);
             }
+            System.out.println("Added new file '"+file.getContent().getFilename()+"' to map.");
+            log.info("Added new file '"+file.getContent().getFilename()+"' to map.");
         }
     };
+    
     private Handler<NetRetrieveFile> handleRetrieveFile = new Handler<NetRetrieveFile>() {
+    	
         @Override
         public void handle(NetRetrieveFile retrieveFile) {
-
+        	if (storedData.containsKey(retrieveFile.getContent().getFileName())) {
+	        	// Fetch all relevant datablocks
+	        	Set<DataBlock> blocks = storedData.get(retrieveFile.getContent().getFileName());
+	        	
+	        	// Send back all relevant blocks
+	    		NetSendDataBlocks msg = new NetSendDataBlocks(selfAddress, retrieveFile.getSource(), blocks);
+	    		trigger(msg, network);
+        	} else {
+        		// Send empty message
+        		NetSendDataBlocks msg = new NetSendDataBlocks(selfAddress, retrieveFile.getSource(), new HashSet<>());
+	    		trigger(msg, network);
+        	}
         }
+        
     };
     
     private Handler<NetRemoveFile> handleRemoveFile = new Handler<NetRemoveFile>() {
         @Override
         public void handle(NetRemoveFile RemoveFile) {
-
+        	// Locate and delete local storage of file.
+        	storedData.remove(RemoveFile.getContent().getFileName());
         }
     };
     
@@ -560,12 +622,72 @@ public class NodeComp extends ComponentDefinition {
 
 		@Override
 		public void handle(NetAddOriginalFile arg0) {
-			// TODO Auto-generated method stub
+			// Locate file on FS
+			final Path FILEPATH = Paths.get(arg0.getContent().getFileName());
+			File f = FILEPATH.toFile();
+			if (!f.exists() || f.isDirectory()) {
+				log.info("Cannot find file. \n"+FILEPATH);
+			} else {
+			
+				// Encode file
+				Set<DataBlock> blocks = new HashSet<>();
+				// ==== ENCODE CODE ====
+	            FountainEncoder fountainCoder = new FountainEncoder(FILEPATH, BYTES_TO_READ); //New encoder with a Path to read
+	            Semaphore s = fountainCoder.dropletsSemaphore();   //Semaphore to see if there are new droplets available
+	            ConcurrentLinkedQueue<DataBlock> result = fountainCoder.getQueue();    //Queue with the output
+	            long startTime = System.currentTimeMillis();
+	            fountainCoder.start();   //Start the encoder in a new thread
+	            int counter = 0;        //Count the number of droplets received
+	            long totalSize = 0;     //Count the total size of the output
+	            
+	            boolean firstAcquire = true;
+	            Semaphore done = fountainCoder.getDoneLock();
+	            while (!done.tryAcquire() || result.peek() != null) {   //Run as long as we're getting blocks
+	                boolean acquired = false;   //See if there are new blocks available
+	                try {
+	                    acquired = s.tryAcquire(100, TimeUnit.MILLISECONDS);
+	                } catch (InterruptedException e) {
+	                    e.printStackTrace();
+	                }
+	
+	                if (acquired) { //We've gotten a new block
+	
+	                    DataBlock block = result.poll();   //retrive the block
+	                    totalSize = totalSize + block.getData().length;
+	                    blocks.add(block);      //Add the block to the block list
+	                    
+	                    counter++;
+	                }
+	
+	            }
+				// ==== END ENCODE CODE ====
+				log.info("Encode complete. Distributing files");
+				Iterator<DataBlock> blocksIterator = blocks.iterator();
+				
+				// Send droplets to n nodes
+				int blocksPerNode = blocks.size() / nodeHandler.getAliveNodes().size();
+				
+				// TODO(Douglas): Add option to only distribute data to subset of nodes
+				for (NatedAddress node : nodeHandler.getAliveNodes().keySet()) {
+					// Split block set into subsets of size n
+					Set<DataBlock> nodeBlockSet = new HashSet<>();
+					
+					for (int i = 0; i < blocksPerNode; i++) {
+						// Exit the loop if there are no more blocks.
+						// Should only trigger on the last node in the list.
+						if (!blocksIterator.hasNext()) break;
+						
+						nodeBlockSet.add(blocksIterator.next());
+					}
+					
+					if (!nodeBlockSet.isEmpty()) {
+						// Send the droplets to the node
+						trigger(new NetAddFile(selfAddress, node, arg0.getContent().getFileName(), nodeBlockSet), network);
+					}
+				}
+			}
 			
 		}
-    	// Locate the original file (via file path provided in message)
-    	// Split the file into droplets
-    	// Send droplets to alive nodes for desired redundancy.
     
     };
     
@@ -573,13 +695,62 @@ public class NodeComp extends ComponentDefinition {
 
 		@Override
 		public void handle(NetRetrieveOriginalFile arg0) {
-			// TODO Auto-generated method stub
+			String filename = arg0.getContent().getFileName();
+			// Clear the waiting list
+			nodeWaitList.clear();
+			for (NatedAddress node : nodeHandler.getAliveNodes().keySet()) {
+				trigger(new NetRetrieveFile(selfAddress, node, new RetrieveFile(filename, selfAddress)), network);
+				nodeWaitList.add(node);
+			}
+			
+			// Wait for all responses
+			Thread waitingThread = new Thread(new Runnable() {
+
+				@Override
+				public void run() {
+					long start = System.currentTimeMillis() / 1000;
+					long elapsedTime = (System.currentTimeMillis() / 1000) - start;
+					while(!nodeWaitList.isEmpty() && elapsedTime < 30) {
+						try {
+							Thread.sleep(100);
+							elapsedTime = (System.currentTimeMillis() / 1000) - start;
+							log.info("Node: elapsedTime (" + elapsedTime + ")");
+						} catch (InterruptedException e) {
+							e.printStackTrace();
+						}
+					}
+				}
+				
+			});
+			
+			waitingThread.start();
+			try {
+				waitingThread.join();
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}			
+			// All nodes have answered.
+
+			// Add own blocks to file			
+			Set<DataBlock> blocks = fileDataBlocks.get(filename);
+			blocks.addAll(storedData.get(filename));
+			
+			// Decode file
+			FountainDecoder decoder = new FountainDecoder(FountainEncoder.getParameters(FountainEncoder.getBytesToRead()));  //Create a new decoder with the same parameters as the encoder
+            blocks.forEach(decoder::addDataBlock);
+
+            decoder.setParameters(FountainEncoder.getParameters(FountainEncoder.getBytesToRead()));
+            decoder.start();
+            try {
+                decoder.join();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            
+			// Return to caller
+            log.info("Decode done");
 			
 		}
-    	// Locate the original file (via file name provided in message)
-    	// Gather droplets
-		// Decode file
-    	// Send file to requester.
     
     };
     
@@ -587,13 +758,31 @@ public class NodeComp extends ComponentDefinition {
 
 		@Override
 		public void handle(NetRemoveOriginalFile arg0) {
-			// TODO Auto-generated method stub
-			
+			// Request deletion from all nodes
+			for (NatedAddress node : nodeHandler.getAliveNodes().keySet()) {
+				trigger(new NetRemoveFile(selfAddress, node, arg0.getContent().getFileName()), network);
+			}			
 		}
-    	// Locate the original file (via file name provided in message)
-    	// Remove droplets
-    	// Send file to requester.
-    
+		
     };
+    
+    private Handler<NetSendDataBlocks> handleSendDataBlocks = new Handler<NetSendDataBlocks>() {
+		
+		@Override
+		public void handle(NetSendDataBlocks sentDataBlocks) {
+			// Message with requested blocks has arrived.
+			// Check if the node had any relevant blocks.
+			Set<DataBlock> receivedBlocks = sentDataBlocks.getContent().getDataBlocks();
+			if (!receivedBlocks.isEmpty()) {
+				for (DataBlock block : receivedBlocks) {
+					// Add the new blocks to the file set
+					fileDataBlocks.get(block.getFilename()).add(block);
+				}				
+			}
+			
+			// Remove the node from the waiting list
+			nodeWaitList.remove(sentDataBlocks.getSource());			
+		}
+	};
 
 }

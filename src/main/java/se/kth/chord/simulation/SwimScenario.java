@@ -263,7 +263,7 @@ public class SwimScenario {
                 startAggregator.start();
                 startPeers.startAfterTerminationOf(1000, startAggregator);
                 fetchSimulationResult.startAfterTerminationOf(simulationLength * 1000, startPeers);
-                terminateAfterTerminationOf(1000, fetchSimulationResult);
+                terminateAfterTerminationOf(20000, fetchSimulationResult);
             }
         };
 
