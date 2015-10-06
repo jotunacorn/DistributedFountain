@@ -273,10 +273,10 @@ public class NodeHandler {
     /**
      * Generates a pong message with piggyback information.
      */
-    public Pong getPong(int pingNr, int incarnationCounter) {
+    public Pong getPong(int pingNr, int incarnationCounter, Map<String, Set<NatedAddress>> fileMap) {
         Map<Address, Integer> newNodesToSend = new HashMap<>();
         Map<Address, Integer> suspectedNodesToSend = new HashMap<>();
-        Map<Address, Integer> deadNodesToSend = new HashMap<>();
+        Map<Address, Integer> deadNodesToSend = new HashMap<>();        
 
         List<NodeInfo> bufferAsList = new ArrayList<>(sendBuffer.values());
 
@@ -326,7 +326,7 @@ public class NodeHandler {
 
             messageSizeCounter++;
         }
-        return new Pong(convertToNated(newNodesToSend), convertToNated(suspectedNodesToSend), convertToNated(deadNodesToSend), pingNr, incarnationCounter);
+        return new Pong(convertToNated(newNodesToSend), convertToNated(suspectedNodesToSend), convertToNated(deadNodesToSend), fileMap, pingNr, incarnationCounter);
     }
 
     /**
